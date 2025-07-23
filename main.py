@@ -93,6 +93,14 @@ def recommend_movies(selected_title, top_n=3):
 
 
 # ======== Streamlit UI ========
+st.markdown(
+    """
+    <div style="height:50px" id="top-anchor"></div>
+""",
+    unsafe_allow_html=True,
+)
+
+
 st.title("🎬 電影推薦系統 Demo")
 
 # 改成文字輸入框（可自行輸入），自動提示靠接近字串匹配
@@ -131,3 +139,29 @@ if movie_title:
                 if rec_poster:
                     st.image(rec_poster, width=200)
                 st.markdown("---")
+
+# ======== 回到最上面按鈕 ========
+st.markdown(
+    """
+    <style>
+    #back-to-top-btn {
+        position: fixed;
+        bottom: 40px;
+        right: 30px;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 12px 16px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: bold;
+        font-size: 14px;
+        z-index: 999;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    </style>
+
+    <a href="#top-anchor" id="back-to-top-btn">⬆ TOP</a>
+""",
+    unsafe_allow_html=True,
+)
