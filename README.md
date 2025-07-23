@@ -52,9 +52,8 @@ streamlit run main.py
 
 ---
 
-## 📷 使用畫面示意
+## 使用畫面示意
 
-> 建議加入執行畫面截圖，例如 `screenshot.png`：
 
 ```markdown
 ![介面示意圖](images/screenshot1.png)
