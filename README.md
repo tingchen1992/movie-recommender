@@ -8,7 +8,8 @@
 
 - 支援模糊查詢電影名稱
 - 顯示電影英文簡介與海報
-- 基於文字內容推薦相似電影
+- 基於文字內容（genre + overview）推薦相似電影
+- 使用 Sentence-Transformers 語意嵌入模型提升推薦準確度
 - 快取加速，體驗更順暢
 
 ---
@@ -66,7 +67,8 @@ streamlit run main.py
 ## 技術重點
 
 - Streamlit 建立互動式網頁應用
-- Scikit-learn：TF-IDF 向量化 + 餘弦相似度推薦
+- Sentence-Transformers：語意向量嵌入模型
+- Scikit-learn：計算餘弦相似度做推薦
 - Pandas 資料前處理與合併
 - TMDB API：即時抓取海報
 
