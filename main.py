@@ -4,29 +4,15 @@ import pandas as pd
 import requests
 import ast
 from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # ======== 載入 API Key ========
 load_dotenv()
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 
 
-# ======== 資料處理工具 ========
-def get_top_cast(cast_str):
-    try:
-        cast = ast.literal_eval(cast_str)
-        return [person["name"] for person in cast[:3]]
-    except:
-        return []
-
-
-def get_director(crew_str):
-    try:
-        crew = ast.literal_eval(crew_str)
-        return [person["name"] for person in crew if person["job"] == "Director"]
-    except:
-        return []
-
-
+# ======== genre 欄位處理 ========
 def get_genres(genres_str):
     try:
         genres = ast.literal_eval(genres_str)
@@ -38,27 +24,45 @@ def get_genres(genres_str):
 # ======== 快取資料讀取 ========
 @st.cache_data
 def load_data():
-    movies_df = pd.read_csv("tmdb_5000_movies.csv")
-    credits_df = pd.read_csv("tmdb_5000_credits.csv")
-
-    movies_df["genres_list"] = movies_df["genres"].apply(get_genres)
-    credits_df["top_cast"] = credits_df["cast"].apply(get_top_cast)
-    credits_df["director"] = credits_df["crew"].apply(get_director)
-
-    df = pd.merge(
-        movies_df,
-        credits_df[["movie_id", "top_cast", "director"]],
-        left_on="id",
-        right_on="movie_id",
-    )
+    df = pd.read_csv("tmdb_5000_movies.csv")
+    df["genres_list"] = df["genres"].apply(get_genres)
+    df["overview"] = df["overview"].fillna("")
     df["tags"] = df.apply(
-        lambda row: " ".join(row["genres_list"] + row["director"] + row["top_cast"]),
-        axis=1,
+        lambda row: " ".join(row["genres_list"]) * 3 + " " + row["overview"], axis=1
     )
     return df
 
 
 df = load_data()
+
+
+# ======== 快取嵌入模型載入 ========
+@st.cache_resource
+def load_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+
+model = load_model()
+
+
+# ======== 快取嵌入計算 ========
+@st.cache_data
+def compute_embeddings(texts):
+    return model.encode(texts, convert_to_tensor=True)
+
+
+embeddings = compute_embeddings(df["tags"].tolist())
+
+
+# ======== 推薦系統主程式 ========
+def recommend_movies(selected_title, top_n=3):
+    idx = df[df["title"] == selected_title].index[0]
+    selected_vec = embeddings[idx].cpu().numpy()
+    all_vecs = embeddings.cpu().numpy()
+    cosine_sim = cosine_similarity([selected_vec], all_vecs)[0]
+    similar_indices = cosine_sim.argsort()[-(top_n + 1) : -1][::-1]
+    similar_scores = cosine_sim[similar_indices]
+    return df.iloc[similar_indices][["title", "overview"]], similar_scores
 
 
 # ======== 海報抓取工具 ========
@@ -78,32 +82,10 @@ def fetch_poster(title):
     return None
 
 
-# ======== 推薦系統 ========
-@st.cache_data
-def recommend_movies(selected_title, top_n=3):
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-
-    tfidf = TfidfVectorizer(stop_words="english")
-    tfidf_matrix = tfidf.fit_transform(df["tags"])
-    idx = df[df["title"] == selected_title].index[0]
-    cosine_sim = cosine_similarity(tfidf_matrix[idx], tfidf_matrix).flatten()
-    similar_indices = cosine_sim.argsort()[-(top_n + 1) : -1][::-1]
-    return df.iloc[similar_indices][["title", "overview"]]
-
-
 # ======== Streamlit UI ========
-st.markdown(
-    """
-    <div style="height:50px" id="top-anchor"></div>
-""",
-    unsafe_allow_html=True,
-)
+st.markdown('<div style="height:50px" id="top-anchor"></div>', unsafe_allow_html=True)
+st.title("🎬 電影推薦系統")
 
-
-st.title("🎬 電影推薦系統 Demo")
-
-# 改成文字輸入框（可自行輸入），自動提示靠接近字串匹配
 search_query = st.text_input("請輸入電影名稱（可模糊搜尋）")
 matched_titles = sorted(
     [title for title in df["title"].unique() if search_query.lower() in title.lower()]
@@ -125,16 +107,13 @@ if movie_title:
     else:
         st.write("找不到電影圖片。")
 
-    if st.button("推薦相似電影"):
+    if st.button("🎯 推薦相似電影"):
         with st.spinner("電影推薦中..."):
-            recommendations = recommend_movies(movie_title, top_n=3)
-            st.subheader("🔍 推薦的相似電影：")
-            for idx, row in recommendations.iterrows():
+            recommendations, scores = recommend_movies(movie_title, top_n=3)
+            st.subheader("🔍 推薦的相似電影")
+            for i, (idx, row) in enumerate(recommendations.iterrows()):
                 st.markdown(f"### 🎞️ {row['title']}")
-                if pd.isna(row["overview"]) or row["overview"].strip() == "":
-                    st.write("無電影簡介")
-                else:
-                    st.write(row["overview"])
+                st.write(row["overview"] if pd.notna(row["overview"]) else "無電影簡介")
                 rec_poster = fetch_poster(row["title"])
                 if rec_poster:
                     st.image(rec_poster, width=200)
@@ -162,6 +141,6 @@ st.markdown(
     </style>
 
     <a href="#top-anchor" id="back-to-top-btn">⬆ TOP</a>
-""",
+    """,
     unsafe_allow_html=True,
 )
