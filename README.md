@@ -32,6 +32,10 @@ python -m venv venv
 source venv/bin/activate  # Windows 請改用 venv\Scripts\activate
 pip install -r requirements.txt
 ```
+如果要使用翻譯功能，請額外安裝 googletrans：
+```
+pip install googletrans==4.0.0-rc1
+```
 
 ### 3. 設定 API 金鑰
 
