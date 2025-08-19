@@ -6,10 +6,14 @@ import ast
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from googletrans import Translator
 
 # ======== 載入 API Key ========
 load_dotenv()
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
+
+# ======== Translator 物件 ========
+translator = Translator()
 
 
 # ======== genre 欄位處理 ========
@@ -82,11 +86,24 @@ def fetch_poster(title):
     return None
 
 
+# ======== 繁體中文翻譯函式 ========
+@st.cache_data
+def translate_to_zh_tw(text):
+    if not text:
+        return ""
+    try:
+        result = translator.translate(text, dest="zh-tw")
+        return result.text
+    except Exception as e:
+        print("翻譯錯誤:", e)
+        return text
+
+
 # ======== Streamlit UI ========
 st.markdown('<div style="height:50px" id="top-anchor"></div>', unsafe_allow_html=True)
 st.title("🎬 電影推薦系統")
 
-search_query = st.text_input("請輸入電影名稱（可模糊搜尋）")
+search_query = st.text_input("請輸入電影的英文名稱（可模糊搜尋）輸入後請按 Enter鍵～目前只能以英文輸入～")
 matched_titles = sorted(
     [title for title in df["title"].unique() if search_query.lower() in title.lower()]
 )
@@ -97,9 +114,14 @@ else:
     movie_title = None
 
 if movie_title:
+    # ===== 主選電影簡介 =====
     overview_en = df.loc[df["title"] == movie_title, "overview"].values[0]
     st.write("**英文簡介:**")
     st.write(overview_en)
+
+    overview_zh = translate_to_zh_tw(overview_en)
+    st.write("**繁體中文簡介:**")
+    st.write(overview_zh)
 
     poster_url = fetch_poster(movie_title)
     if poster_url:
@@ -107,16 +129,31 @@ if movie_title:
     else:
         st.write("找不到電影圖片。")
 
+    # ===== 推薦電影區塊 =====
     if st.button("🎯 推薦相似電影"):
         with st.spinner("電影推薦中..."):
             recommendations, scores = recommend_movies(movie_title, top_n=3)
             st.subheader("🔍 推薦的相似電影")
             for i, (idx, row) in enumerate(recommendations.iterrows()):
                 st.markdown(f"### 🎞️ {row['title']}")
-                st.write(row["overview"] if pd.notna(row["overview"]) else "無電影簡介")
+
+                # 英文簡介
+                overview_en = (
+                    row["overview"] if pd.notna(row["overview"]) else "無電影簡介"
+                )
+                st.write("**英文簡介:**")
+                st.write(overview_en)
+
+                # 中文翻譯
+                overview_zh = translate_to_zh_tw(overview_en)
+                st.write("**繁體中文簡介:**")
+                st.write(overview_zh)
+
+                # 海報
                 rec_poster = fetch_poster(row["title"])
                 if rec_poster:
                     st.image(rec_poster, width=200)
+
                 st.markdown("---")
 
 # ======== 回到最上面按鈕 ========
