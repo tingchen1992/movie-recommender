@@ -12,13 +12,19 @@ transformers==4.31.0
 sentence-transformers==2.2.2
 huggingface-hub==0.17.3
 
-# 翻譯套件
+# 翻譯
 deep-translator==1.10.1
 
 # 其他支援套件
-rich==14.1.0
+rich==13.3.5
 markdown-it-py==4.0.0
 mdurl==0.1.2
 pygments==2.19.2
 python-dotenv==1.0.0
 requests==2.31.0
+blinker==1.9.0
+cachetools==6.1.0
+click==8.2.1
+filelock==3.18.0
+fsspec==2025.7.0
+gitdb==4.0.12
