@@ -12,6 +12,9 @@ from deep_translator import GoogleTranslator
 load_dotenv()
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 
+# ======== Translator 物件 ========
+translator = GoogleTranslator(source='auto', target='zh-TW')
+
 # ======== genre 欄位處理 ========
 def get_genres(genres_str):
     try:
@@ -49,7 +52,6 @@ embeddings = compute_embeddings(df["tags"].tolist())
 
 # ======== API 搜尋新片 ========
 def get_movie_from_api(title):
-    """從 TMDB API 抓取電影資訊（如果 CSV 沒有的話）"""
     url = "https://api.themoviedb.org/3/search/movie"
     params = {"api_key": TMDB_API_KEY, "query": title, "language": "en-US"}
     response = requests.get(url, params=params)
@@ -63,9 +65,7 @@ def get_movie_from_api(title):
         detail_url = f"https://api.themoviedb.org/3/movie/{movie_id}"
         detail_params = {"api_key": TMDB_API_KEY, "language": "en-US"}
         detail_resp = requests.get(detail_url, params=detail_params).json()
-        genres = []
-        if "genres" in detail_resp:
-            genres = [g["name"] for g in detail_resp["genres"]]
+        genres = [g["name"] for g in detail_resp.get("genres", [])]
 
         return {
             "title": movie["title"],
@@ -75,7 +75,7 @@ def get_movie_from_api(title):
         }
     return None
 
-# ======== 動態推薦系統（排除自己選的電影） ========
+# ======== 動態推薦系統 ========
 def recommend_movies_dynamic(title, top_n=3):
     if title in df["title"].values:
         idx = df[df["title"] == title].index[0]
@@ -110,7 +110,7 @@ def recommend_movies_dynamic(title, top_n=3):
         None,
     )
 
-# ======== 海報抓取工具 ========
+# ======== 海報抓取 ========
 @st.cache_data
 def fetch_poster(title):
     search_url = "https://api.themoviedb.org/3/search/movie"
@@ -118,22 +118,20 @@ def fetch_poster(title):
     try:
         response = requests.get(search_url, params=params)
         data = response.json()
-        if data.get("results"):
-            poster_path = data["results"][0].get("poster_path")
-            if poster_path:
-                return f"https://image.tmdb.org/t/p/w500{poster_path}"
+        poster_path = data["results"][0].get("poster_path") if data.get("results") else None
+        if poster_path:
+            return f"https://image.tmdb.org/t/p/w500{poster_path}"
     except Exception as e:
         print("抓海報錯誤:", e)
     return None
 
-# ======== 繁體中文翻譯函式 ========
+# ======== 繁體中文翻譯 ========
 @st.cache_data
 def translate_to_zh_tw(text):
     if not text:
         return ""
     try:
-        result = GoogleTranslator(source='auto', target='zh-TW').translate(text)
-        return result
+        return translator.translate(text)
     except Exception as e:
         print("翻譯錯誤:", e)
         return text
@@ -142,11 +140,9 @@ def translate_to_zh_tw(text):
 st.markdown('<div style="height:50px" id="top-anchor"></div>', unsafe_allow_html=True)
 st.title("🎬 電影推薦系統（支援最新電影）")
 
-search_query = st.text_input("請輸入電影名稱（支援舊片與最新電影）")
+search_query = st.text_input("請輸入電影名稱（英文即可，支援舊片與最新電影）")
 
-matched_titles = sorted(
-    [title for title in df["title"].unique() if search_query.lower() in title.lower()]
-)
+matched_titles = sorted([title for title in df["title"].unique() if search_query.lower() in title.lower()])
 
 if matched_titles:
     movie_title = st.selectbox("請選擇電影", matched_titles)
@@ -157,15 +153,12 @@ else:
 
 if movie_title:
     with st.spinner("抓取電影資訊中..."):
-        recommendations, scores, movie_info, error_msg = recommend_movies_dynamic(
-            movie_title, top_n=3
-        )
+        recommendations, scores, movie_info, error_msg = recommend_movies_dynamic(movie_title, top_n=3)
 
     if error_msg:
         st.error(error_msg)
     else:
         overview_en, poster_url = movie_info
-
         st.write("**英文簡介:**")
         st.write(overview_en)
 
@@ -194,27 +187,23 @@ if movie_title:
                         st.image(rec_poster, width=200)
                     st.markdown("---")
 
-st.markdown(
-    """
-    <style>
-    #back-to-top-btn {
-        position: fixed;
-        bottom: 40px;
-        right: 30px;
-        background-color: #4CAF50;
-        color: white;
-        border: none;
-        padding: 12px 16px;
-        border-radius: 8px;
-        text-decoration: none;
-        font-weight: bold;
-        font-size: 14px;
-        z-index: 999;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-    }
-    </style>
-
-    <a href="#top-anchor" id="back-to-top-btn">⬆ TOP</a>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("""
+<style>
+#back-to-top-btn {
+    position: fixed;
+    bottom: 40px;
+    right: 30px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 12px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 14px;
+    z-index: 999;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+</style>
+<a href="#top-anchor" id="back-to-top-btn">⬆ TOP</a>
+""", unsafe_allow_html=True)
