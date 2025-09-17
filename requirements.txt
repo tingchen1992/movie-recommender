@@ -54,3 +54,6 @@ typing_extensions==4.14.1
 tzdata==2025.2
 urllib3==2.5.0
 googletrans==4.0.0-rc1
+httpx==0.23.3
+httpcore==0.15.0
+
