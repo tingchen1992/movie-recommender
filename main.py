@@ -58,15 +58,77 @@ def compute_embeddings(texts):
 embeddings = compute_embeddings(df["tags"].tolist())
 
 
-# ======== 推薦系統主程式 ========
-def recommend_movies(selected_title, top_n=3):
-    idx = df[df["title"] == selected_title].index[0]
-    selected_vec = embeddings[idx].cpu().numpy()
+# ======== API 搜尋新片 ========
+def get_movie_from_api(title):
+    """從 TMDB API 抓取電影資訊（如果 CSV 沒有的話）"""
+    url = "https://api.themoviedb.org/3/search/movie"
+    params = {"api_key": TMDB_API_KEY, "query": title, "language": "en-US"}
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    if data.get("results"):
+        movie = data["results"][0]  # 取最相關的第一個結果
+        overview = movie.get("overview", "")
+        movie_id = movie["id"]
+
+        # 再抓詳細資料（拿 genre 名稱）
+        detail_url = f"https://api.themoviedb.org/3/movie/{movie_id}"
+        detail_params = {"api_key": TMDB_API_KEY, "language": "en-US"}
+        detail_resp = requests.get(detail_url, params=detail_params).json()
+        genres = []
+        if "genres" in detail_resp:
+            genres = [g["name"] for g in detail_resp["genres"]]
+
+        return {
+            "title": movie["title"],
+            "overview": overview,
+            "genres_list": genres,
+            "poster_path": movie.get("poster_path"),
+        }
+    return None
+
+
+# ======== 動態推薦系統（排除自己選的電影） ========
+def recommend_movies_dynamic(title, top_n=3):
+    if title in df["title"].values:
+        # ✅ 舊資料集有這部電影
+        idx = df[df["title"] == title].index[0]
+        selected_vec = embeddings[idx].cpu().numpy()
+        overview = df.loc[idx, "overview"]
+        poster_url = fetch_poster(title)
+    else:
+        # ✅ 舊資料集沒有 → 從 API 抓
+        movie_info = get_movie_from_api(title)
+        if not movie_info:
+            return None, None, None, "找不到電影"
+
+        tags = " ".join(movie_info["genres_list"]) * 3 + " " + movie_info["overview"]
+        selected_vec = model.encode([tags])[0]
+        overview = movie_info["overview"]
+        poster_url = (
+            f"https://image.tmdb.org/t/p/w500{movie_info['poster_path']}"
+            if movie_info["poster_path"]
+            else None
+        )
+
+    # 相似度計算
     all_vecs = embeddings.cpu().numpy()
     cosine_sim = cosine_similarity([selected_vec], all_vecs)[0]
-    similar_indices = cosine_sim.argsort()[-(top_n + 1) : -1][::-1]
+
+    # 取相似度排序（由大到小，排除自己本身）
+    similar_indices = cosine_sim.argsort()[::-1]
+    similar_indices = [i for i in similar_indices if df.iloc[i]["title"] != title]
+
+    # 只取前 top_n 筆
+    similar_indices = similar_indices[:top_n]
     similar_scores = cosine_sim[similar_indices]
-    return df.iloc[similar_indices][["title", "overview"]], similar_scores
+
+    return (
+        df.iloc[similar_indices][["title", "overview"]],
+        similar_scores,
+        (overview, poster_url),
+        None,
+    )
 
 
 # ======== 海報抓取工具 ========
@@ -101,9 +163,11 @@ def translate_to_zh_tw(text):
 
 # ======== Streamlit UI ========
 st.markdown('<div style="height:50px" id="top-anchor"></div>', unsafe_allow_html=True)
-st.title("🎬 電影推薦系統")
+st.title("🎬 電影推薦系統（支援最新電影）")
 
-search_query = st.text_input("請輸入電影的英文名稱（可模糊搜尋）輸入後請按 Enter鍵～目前只能以英文輸入～")
+search_query = st.text_input("請輸入電影名稱（只能輸入英文，支援舊片與最新電影）")
+
+# ======== 搜尋邏輯 ========
 matched_titles = sorted(
     [title for title in df["title"].unique() if search_query.lower() in title.lower()]
 )
@@ -111,50 +175,59 @@ matched_titles = sorted(
 if matched_titles:
     movie_title = st.selectbox("請選擇電影（根據你輸入的關鍵字）", matched_titles)
 else:
-    movie_title = None
+    movie_title = search_query if search_query else None
+    if search_query and not matched_titles:
+        st.info(f"⚡ 嘗試從 TMDB API 搜尋 **{search_query}** ...")
 
+# ======== 顯示選取的電影 ========
 if movie_title:
-    # ===== 主選電影簡介 =====
-    overview_en = df.loc[df["title"] == movie_title, "overview"].values[0]
-    st.write("**英文簡介:**")
-    st.write(overview_en)
+    with st.spinner("抓取電影資訊中..."):
+        recommendations, scores, movie_info, error_msg = recommend_movies_dynamic(
+            movie_title, top_n=3
+        )
 
-    overview_zh = translate_to_zh_tw(overview_en)
-    st.write("**繁體中文簡介:**")
-    st.write(overview_zh)
-
-    poster_url = fetch_poster(movie_title)
-    if poster_url:
-        st.image(poster_url, caption=movie_title)
+    if error_msg:
+        st.error(error_msg)
     else:
-        st.write("找不到電影圖片。")
+        overview_en, poster_url = movie_info
 
-    # ===== 推薦電影區塊 =====
-    if st.button("🎯 推薦相似電影"):
-        with st.spinner("電影推薦中..."):
-            recommendations, scores = recommend_movies(movie_title, top_n=3)
-            st.subheader("🔍 推薦的相似電影")
-            for i, (idx, row) in enumerate(recommendations.iterrows()):
-                st.markdown(f"### 🎞️ {row['title']}")
+        st.write("**英文簡介:**")
+        st.write(overview_en)
 
-                # 英文簡介
-                overview_en = (
-                    row["overview"] if pd.notna(row["overview"]) else "無電影簡介"
-                )
-                st.write("**英文簡介:**")
-                st.write(overview_en)
+        overview_zh = translate_to_zh_tw(overview_en)
+        st.write("**繁體中文簡介:**")
+        st.write(overview_zh)
 
-                # 中文翻譯
-                overview_zh = translate_to_zh_tw(overview_en)
-                st.write("**繁體中文簡介:**")
-                st.write(overview_zh)
+        if poster_url:
+            st.image(poster_url, caption=movie_title)
+        else:
+            st.write("找不到電影圖片。")
 
-                # 海報
-                rec_poster = fetch_poster(row["title"])
-                if rec_poster:
-                    st.image(rec_poster, width=200)
+        # ===== 推薦電影區塊 =====
+        if st.button("🎯 推薦相似電影"):
+            with st.spinner("電影推薦中..."):
+                st.subheader("🔍 推薦的相似電影")
+                for i, (idx, row) in enumerate(recommendations.iterrows()):
+                    st.markdown(f"### 🎞️ {row['title']}")
 
-                st.markdown("---")
+                    # 英文簡介
+                    overview_en = (
+                        row["overview"] if pd.notna(row["overview"]) else "無電影簡介"
+                    )
+                    st.write("**英文簡介:**")
+                    st.write(overview_en)
+
+                    # 中文翻譯
+                    overview_zh = translate_to_zh_tw(overview_en)
+                    st.write("**繁體中文簡介:**")
+                    st.write(overview_zh)
+
+                    # 海報
+                    rec_poster = fetch_poster(row["title"])
+                    if rec_poster:
+                        st.image(rec_poster, width=200)
+
+                    st.markdown("---")
 
 # ======== 回到最上面按鈕 ========
 st.markdown(
